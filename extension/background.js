@@ -74,7 +74,7 @@ chrome.debugger.onEvent.addListener(function(source, method, params) {
     console.log("Response received:", params.requestId, params.response.url);
 
     // Check if this is a Claude API response
-    if (params.response.url.includes("claude.ai/api/")) {
+    if (params.response.url.includes("claude.ai/api/") && params.response.url.includes("completion")) {
       console.log("Claude API response detected!");
 
       // Get response body
@@ -102,7 +102,34 @@ chrome.debugger.onEvent.addListener(function(source, method, params) {
             xhr.setRequestHeader('Content-Type', 'application/json');
             xhr.onreadystatechange = function() {
               if (xhr.readyState === 4) {
-                console.log("Server response:", xhr.status);
+                if (xhr.status === 200) {
+                  try {
+                    const response = JSON.parse(xhr.responseText);
+
+                    // Check if there's a message to inject
+                    if (response.injectMessage) {
+                      // Find all Claude tabs and inject the message
+                      chrome.tabs.query({url: "*://*.claude.ai/*"}, function(tabs) {
+                        if (tabs.length > 0) {
+                          // Send the message to each tab
+                          tabs.forEach(tab => {
+                            chrome.tabs.sendMessage(tab.id, {
+                              action: 'injectMessage',
+                              message: response.injectMessage
+                            }, function(response) {
+                              console.log('Injection response:', response);
+                            });
+                          });
+                          console.log('Sent message to', tabs.length, 'Claude tabs');
+                        } else {
+                          console.log('No Claude tabs found to inject message');
+                        }
+                      });
+                    }
+                  } catch (e) {
+                    console.error("Error parsing server response:", e);
+                  }
+                }
               }
             };
             xhr.send(JSON.stringify({
@@ -132,5 +159,33 @@ chrome.tabs.onRemoved.addListener(function(tabId) {
     console.log("Debugged tab was closed, finding another Claude tab");
     debuggedTabId = null;
     findAndAttachToClaudeTab();
+  }
+});
+
+function injectSystemMessage(message) {
+  // Find all Claude tabs
+  chrome.tabs.query({url: "*://*.claude.ai/*"}, function(tabs) {
+    if (tabs.length > 0) {
+      // Send the message to each tab
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, {
+          action: 'injectMessage',
+          message: message
+        }, function(response) {
+          console.log('Injection response:', response);
+        });
+      });
+      console.log('Sent system message to', tabs.length, 'Claude tabs');
+    } else {
+      console.log('No Claude tabs found to inject message');
+    }
+  });
+}
+
+chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+  if (request.action === 'injectSystemMessage' && request.message) {
+    injectSystemMessage(request.message);
+    sendResponse({status: 'success'});
+    return true;
   }
 });
