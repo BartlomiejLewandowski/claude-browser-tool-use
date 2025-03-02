@@ -1,8 +1,9 @@
 // Global variables
-let systemMessage = null;
+let systemMessages = []; // Instead of systemMessage = null
 let messageIndicator = null;
 let initAttempts = 0;
 const MAX_INIT_ATTEMPTS = 10;
+let isPasting = false;
 
 // Add a flag to prevent recursive updates
 let isUpdating = false;
@@ -93,10 +94,14 @@ function createPersistentIndicator(referenceElement) {
     // Create status text element
     const statusText = document.createElement('div');
     statusText.className = 'status-text';
+    statusText.style.flexGrow = '1'; // Take up available space
     messageIndicator.appendChild(statusText);
 
-    // Create button container (for alignment)
+    // Create button container with flex layout
     const buttonContainer = document.createElement('div');
+    buttonContainer.className = 'button-container';
+    buttonContainer.style.display = 'flex';
+    buttonContainer.style.gap = '8px'; // Space between buttons
     messageIndicator.appendChild(buttonContainer);
 
     // Set initial text and update status
@@ -110,7 +115,6 @@ function createPersistentIndicator(referenceElement) {
 
     return messageIndicator;
 }
-
 // Create a fallback indicator if we can't find the reference element
 function createFallbackIndicator() {
     // First try to remove any existing indicator
@@ -154,15 +158,18 @@ function createFallbackIndicator() {
 
 // Function to paste system message into the Claude input element
 function pasteSystemMessage() {
-    if (!systemMessage) return false;
+    if (systemMessages.length === 0 || isPasting) return false;
 
     try {
+        isPasting = true;
+
         // Find the input element using the specific data-placeholder attribute
         const inputElement = document.querySelector('[data-placeholder="Reply to Claude..."]');
 
         if (!inputElement) {
             console.error("Could not find Claude input element");
             alert("Could not find Claude's input field. Please try again or paste manually.");
+            isPasting = false;
             return false;
         }
 
@@ -185,35 +192,46 @@ function pasteSystemMessage() {
         selection.removeAllRanges();
         selection.addRange(range);
 
-        // Create the system message text
-        const systemMessageText = `[System: ${systemMessage}]\n\n`;
+        // Create combined system message text with all messages
+        let systemMessageText = '';
+        systemMessages.forEach(msg => {
+            systemMessageText += `[System: ${msg}]\n`;
+        });
+        systemMessageText += '\n'; // Add final newline
 
         // Insert the system message at the beginning using execCommand
         document.execCommand('insertText', false, systemMessageText);
 
-        // Clear the system message
-        systemMessage = null;
+        // Clear all system messages
+        systemMessages = [];
         updateIndicatorStatus();
 
+        isPasting = false;
         return true;
     } catch (error) {
         console.error("Error pasting system message:", error);
+        isPasting = false;
 
         // Fallback: Copy to clipboard and alert user
-        navigator.clipboard.writeText(`[System: ${systemMessage}]\n\n`)
+        let combinedMessage = '';
+        systemMessages.forEach(msg => {
+            combinedMessage += `[System: ${msg}]\n`;
+        });
+        combinedMessage += '\n';
+
+        navigator.clipboard.writeText(combinedMessage)
             .then(() => {
-                alert("System message copied to clipboard. Please paste it at the beginning of your message to Claude.");
-                systemMessage = null;
+                alert("System messages copied to clipboard. Please paste at the beginning of your message to Claude.");
+                systemMessages = [];
                 updateIndicatorStatus();
             })
             .catch(err => {
-                alert("Could not paste system message. Please type: [System: " + systemMessage + "] at the beginning of your message.");
+                alert("Could not paste system messages. Please type them manually at the beginning of your message.");
             });
 
         return false;
     }
 }
-
 // Update the indicator text based on whether a system message is queued
 function updateIndicatorStatus() {
     if (!messageIndicator || isUpdating) return;
@@ -229,24 +247,32 @@ function updateIndicatorStatus() {
     }
 
     // Get or create the button container
-    let buttonContainer = messageIndicator.querySelector('div:not(.status-text)');
+    let buttonContainer = messageIndicator.querySelector('.button-container');
     if (!buttonContainer) {
         buttonContainer = document.createElement('div');
+        buttonContainer.className = 'button-container';
+        buttonContainer.style.display = 'flex';
+        buttonContainer.style.gap = '8px'; // Space between buttons
         messageIndicator.appendChild(buttonContainer);
     }
 
     // Clear existing buttons
     buttonContainer.innerHTML = '';
 
-    if (systemMessage) {
+    if (systemMessages.length > 0) {
         // Update text and style for active state
-        statusText.textContent = `System message ready: "${systemMessage}"`;
+        if (systemMessages.length === 1) {
+            statusText.textContent = `System message ready: "${systemMessages[0]}"`;
+        } else {
+            statusText.textContent = `${systemMessages.length} system messages ready`;
+        }
+
         messageIndicator.style.backgroundColor = '#143d2b'; // Dark green
         messageIndicator.style.borderColor = '#1e5937'; // Darker green border
 
         // Add paste button
         const pasteButton = document.createElement('button');
-        pasteButton.textContent = 'Paste Message';
+        pasteButton.textContent = 'Paste Messages';
         pasteButton.style.padding = '6px 12px';
         pasteButton.style.backgroundColor = '#238636';
         pasteButton.style.color = 'white';
@@ -254,7 +280,6 @@ function updateIndicatorStatus() {
         pasteButton.style.borderRadius = '4px';
         pasteButton.style.cursor = 'pointer';
         pasteButton.style.fontWeight = 'bold';
-        pasteButton.style.marginLeft = '10px';
 
         pasteButton.onclick = function() {
             pasteSystemMessage();
@@ -271,10 +296,9 @@ function updateIndicatorStatus() {
         clearButton.style.border = '1px solid #e6edf3';
         clearButton.style.borderRadius = '4px';
         clearButton.style.cursor = 'pointer';
-        clearButton.style.marginLeft = '8px';
 
         clearButton.onclick = function() {
-            systemMessage = null;
+            systemMessages = [];
             updateIndicatorStatus();
         };
 
@@ -287,11 +311,10 @@ function updateIndicatorStatus() {
     }
     isUpdating = false;
 }
-
 // Listen for messages from the extension
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     if (request.action === "injectMessage") {
-        systemMessage = request.message;
+        systemMessages.push(request.message);
         updateIndicatorStatus();
         sendResponse({status: "success"});
     }
