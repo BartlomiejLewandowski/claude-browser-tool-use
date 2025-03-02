@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Claude API Listener</title>
+    <style>
+        body {
+            width: 300px;
+            padding: 10px;
+            font-family: Arial, sans-serif;
+        }
+        .status {
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 4px;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        button {
+            margin-top: 10px;
+            padding: 5px 10px;
+        }
+    </style>
+</head>
+<body>
+<h2>Claude API Listener</h2>
+<p>Status: <span id="status">Checking...</span></p>
+<div id="statusBox" class="status">Connecting to server...</div>
+<button id="testConnection">Test Connection</button>
+<button id="testInjection">Inject Test Message</button>
+<script src="popup.js"></script>
+</body>
+</html>
