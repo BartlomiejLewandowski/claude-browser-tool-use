@@ -19,6 +19,7 @@
     }
   ],
   "browser_action": {
-    "default_title": "Claude API Listener"
+    "default_title": "Claude API Listener",
+    "default_popup": "popup.html"
   }
 }
