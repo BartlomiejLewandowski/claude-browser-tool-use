@@ -9,17 +9,17 @@
     "*://*.claude.ai/*"
   ],
   "background": {
-    "scripts": ["background.js"],
+    "scripts": ["src/background.js", "src/dev/reload.js"],
     "persistent": true
   },
   "content_scripts": [
     {
       "matches": ["*://*.claude.ai/*"],
-      "js": ["content.js"]
+      "js": ["src/content.js"]
     }
   ],
   "browser_action": {
     "default_title": "Claude API Listener",
-    "default_popup": "popup.html"
+    "default_popup": "src/popup.html"
   }
 }

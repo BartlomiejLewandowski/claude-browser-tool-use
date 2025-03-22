@@ -1,7 +1,7 @@
 
 // popup.js
 document.addEventListener('DOMContentLoaded', function() {
-    const serverUrl = 'http://localhost:3000/ping';
+    const serverUrl = 'http://localhost:3003/ping';
     const statusElement = document.getElementById('status');
     const statusBox = document.getElementById('statusBox');
     const testButton = document.getElementById('testConnection');

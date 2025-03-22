@@ -2,17 +2,22 @@
   "name": "server",
   "version": "1.0.0",
   "description": "",
-  "main": "server.js",
+  "main": "server.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "migrate": "ts-node db/db-migration.ts",
+    "dev": "ts-node server.ts"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@types/node": "^22.13.9",
     "body-parser": "^1.20.3",
     "cors": "^2.8.5",
     "express": "^4.21.2",
-    "googleapis": "^146.0.0"
+    "googleapis": "^146.0.0",
+    "sqlite3": "^5.1.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
   }
 }
