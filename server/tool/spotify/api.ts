@@ -148,7 +148,7 @@ export async function getAuthToken(credentials: SpotifyCredentials): Promise<Spo
 
                 await saveToken(token);
                 resolve(token);
-            } catch (err) {
+            } catch (err: any) {
                 console.error('Error getting access token:', err.response?.data || err.message);
                 reject(err);
             }
@@ -190,7 +190,7 @@ export async function refreshToken(token: SpotifyToken, credentials: SpotifyCred
 
         await saveToken(newToken);
         return newToken;
-    } catch (err) {
+    } catch (err:any) {
         console.error('Error refreshing token:', err.response?.data || err.message);
         throw err;
     }
@@ -229,7 +229,7 @@ export async function getAvailableDevices(token: SpotifyToken): Promise<SpotifyD
         });
 
         return response.data.devices;
-    } catch (err) {
+    } catch (err:any) {
         console.error('Error getting devices:', err.response?.data || err.message);
         throw err;
     }
@@ -256,7 +256,7 @@ export async function searchTrack(token: SpotifyToken, query: string): Promise<S
         }
 
         return response.data.tracks.items[0];
-    } catch (err) {
+    } catch (err:any) {
         console.error('Error searching for track:', err.response?.data || err.message);
         throw err;
     }
@@ -280,7 +280,7 @@ export async function playTrack(token: SpotifyToken, deviceId: string, trackUri:
 
         console.log(`Playing track: ${trackUri}`);
         return true;
-    } catch (err) {
+    } catch (err:any) {
         console.error('Error playing track:', err.response?.data || err.message);
         throw err;
     }

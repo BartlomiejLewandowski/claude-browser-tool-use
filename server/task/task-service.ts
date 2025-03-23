@@ -6,12 +6,14 @@ import {sourcePackageDirectory} from "../config";
 interface Task {
     id?: number;
     message_uuid: string;
+    conversation_id: string;
     status: string;
     type?: string;
     created_at?: string;
     updated_at?: string;
     result?: string;
     error?: string;
+    acknowledged: boolean;
 }
 
 class TaskService {
@@ -40,12 +42,14 @@ class TaskService {
       CREATE TABLE IF NOT EXISTS tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         message_uuid TEXT UNIQUE NOT NULL,
+        conversation_id TEXT NOT NULL,
         status TEXT NOT NULL,
         type TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         result TEXT,
-        error TEXT
+        error TEXT,
+        acknowledged BOOLEAN DEFAULT FALSE
       )
     `;
 
@@ -72,19 +76,22 @@ class TaskService {
         });
     }
 
-    public markAsNonActionable(messageUUID: string): Promise<void> {
+    public markAsNonActionable(messageUUID: string, conversationId: string): Promise<void> {
         return new Promise((resolve, reject) => {
             const timestamp = new Date().toISOString();
             const query = `
-        INSERT INTO tasks (message_uuid, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO tasks (message_uuid, conversation_id, status, created_at, updated_at, acknowledged)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(message_uuid) DO UPDATE SET
         status = ?,
-        updated_at = ?
+        conversation_id = ?,
+        updated_at = ?,
+        acknowledged = ?
       `;
             this.db.run(
                 query,
-                [messageUUID, 'non_actionable', timestamp, timestamp, 'non_actionable', timestamp],
+                [messageUUID, conversationId, 'non_actionable', timestamp, timestamp, false,
+                    'non_actionable', conversationId, timestamp, false],
                 function (err) {
                     if (err) {
                         console.error('Error marking task as non-actionable:', err.message);
@@ -98,19 +105,23 @@ class TaskService {
         });
     }
 
-    public startProcessing(messageUUID: string, jobType: string): Promise<void> {
+    public startProcessing(messageUUID: string, conversationId: string, jobType: string): Promise<void> {
         return new Promise((resolve, reject) => {
             const timestamp = new Date().toISOString();
             const query = `
-        INSERT INTO tasks (message_uuid, status, type, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO tasks (message_uuid, conversation_id, status, type, created_at, updated_at, acknowledged)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(message_uuid) DO UPDATE SET
         status = ?,
-        updated_at = ?
+        conversation_id = ?,
+        type = ?,
+        updated_at = ?,
+        acknowledged = ?
       `;
             this.db.run(
                 query,
-                [messageUUID, 'processing', jobType, timestamp, timestamp, 'processing', timestamp],
+                [messageUUID, conversationId, 'processing', jobType, timestamp, timestamp, false,
+                    'processing', conversationId, jobType, timestamp, false],
                 function (err) {
                     if (err) {
                         console.error('Error starting task processing:', err.message);
@@ -134,13 +145,14 @@ class TaskService {
         UPDATE tasks
         SET status = ?,
             result = ?,
-            updated_at = ?
+            updated_at = ?,
+            acknowledged = ?
         WHERE message_uuid = ?
       `;
 
             this.db.run(
                 query,
-                ['completed', resultJSON, timestamp, messageUUID],
+                ['completed', resultJSON, timestamp, false, messageUUID],
                 function (err) {
                     if (err) {
                         console.error('Error completing task:', err.message);
@@ -164,13 +176,14 @@ class TaskService {
         UPDATE tasks
         SET status = ?,
             error = ?,
-            updated_at = ?
+            updated_at = ?,
+            acknowledged = ?
         WHERE message_uuid = ?
       `;
 
             this.db.run(
                 query,
-                ['error', errorMessage, timestamp, messageUUID],
+                ['error', errorMessage, timestamp, false, messageUUID],
                 function (err) {
                     if (err) {
                         console.error('Error updating task error status:', err.message);
@@ -199,16 +212,19 @@ class TaskService {
                             console.warn('Failed to parse task result JSON:', e.message);
                         }
                     }
+                    if (row) {
+                        row.acknowledged = !!row.acknowledged;
+                    }
                     resolve(row || null);
                 }
             });
         });
     }
 
-    public getAllTasks(filters: { status?: string; type?: string } = {}): Promise<Task[]> {
+    public getAllTasks(filters: { status?: string; type?: string; acknowledged?: boolean; conversation_id?: string } = {}): Promise<Task[]> {
         return new Promise((resolve, reject) => {
             let query = 'SELECT * FROM tasks';
-            const params: string[] = [];
+            const params: any[] = [];
 
             const whereConditions: string[] = [];
             if (filters.status) {
@@ -219,6 +235,16 @@ class TaskService {
             if (filters.type) {
                 whereConditions.push('type = ?');
                 params.push(filters.type);
+            }
+
+            if (filters.acknowledged !== undefined) {
+                whereConditions.push('acknowledged = ?');
+                params.push(filters.acknowledged ? 1 : 0);
+            }
+
+            if (filters.conversation_id) {
+                whereConditions.push('conversation_id = ?');
+                params.push(filters.conversation_id);
             }
 
             if (whereConditions.length > 0) {
@@ -240,10 +266,46 @@ class TaskService {
                                 console.warn(`Failed to parse result JSON for task ${row.id}:`, e.message);
                             }
                         }
+                        // Convert SQLite integer to boolean
+                        row.acknowledged = !!row.acknowledged;
                     });
                     resolve(rows);
                 }
             });
+        });
+    }
+
+    public getUnacknowledgedTasksByConversation(conversationId: string): Promise<Task[]> {
+        return this.getAllTasks({
+            acknowledged: false,
+            conversation_id: conversationId,
+            status: 'completed'
+        });
+    }
+
+    public acknowledgeTask(messageUUID: string): Promise<void> {
+        return new Promise((resolve, reject) => {
+            const timestamp = new Date().toISOString();
+            const query = `
+        UPDATE tasks
+        SET acknowledged = ?,
+            updated_at = ?
+        WHERE message_uuid = ?
+      `;
+
+            this.db.run(
+                query,
+                [true, timestamp, messageUUID],
+                function (err) {
+                    if (err) {
+                        console.error('Error acknowledging task:', err.message);
+                        reject(err);
+                    } else {
+                        console.log(`Task acknowledged for message ${messageUUID}`);
+                        resolve();
+                    }
+                }
+            );
         });
     }
 

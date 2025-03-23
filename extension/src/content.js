@@ -1,5 +1,6 @@
 // Global variables
-let systemMessages = []; // Instead of systemMessage = null
+let systemMessagesWithUUID = []; // Array of {message: string, messageUUID: string}
+
 let messageIndicator = null;
 let initAttempts = 0;
 const MAX_INIT_ATTEMPTS = 10;
@@ -158,7 +159,7 @@ function createFallbackIndicator() {
 
 // Function to paste system message into the Claude input element
 function pasteSystemMessage() {
-    if (systemMessages.length === 0 || isPasting) return false;
+    if (systemMessagesWithUUID.length === 0 || isPasting) return false;
 
     try {
         isPasting = true;
@@ -194,16 +195,19 @@ function pasteSystemMessage() {
 
         // Create combined system message text with all messages
         let systemMessageText = '';
-        systemMessages.forEach(msg => {
-            systemMessageText += `[System: ${msg}]\n`;
+        systemMessagesWithUUID.forEach(msgObj => {
+            systemMessageText += `[System: ${msgObj.message}]\n`;
         });
         systemMessageText += '\n'; // Add final newline
 
         // Insert the system message at the beginning using execCommand
         document.execCommand('insertText', false, systemMessageText);
 
-        // Clear all system messages
-        systemMessages = [];
+        // Store message UUIDs to acknowledge them on send
+        const messageUUIDs = systemMessagesWithUUID.map(msgObj => msgObj.messageUUID);
+
+        // Clear the system messages
+        systemMessagesWithUUID = [];
         updateIndicatorStatus();
 
         isPasting = false;
@@ -214,15 +218,15 @@ function pasteSystemMessage() {
 
         // Fallback: Copy to clipboard and alert user
         let combinedMessage = '';
-        systemMessages.forEach(msg => {
-            combinedMessage += `[System: ${msg}]\n`;
+        systemMessagesWithUUID.forEach(msgObj => {
+            combinedMessage += `[System: ${msgObj.message}]\n`;
         });
         combinedMessage += '\n';
 
         navigator.clipboard.writeText(combinedMessage)
             .then(() => {
                 alert("System messages copied to clipboard. Please paste at the beginning of your message to Claude.");
-                systemMessages = [];
+                systemMessagesWithUUID = [];
                 updateIndicatorStatus();
             })
             .catch(err => {
@@ -232,7 +236,7 @@ function pasteSystemMessage() {
         return false;
     }
 }
-// Update the indicator text based on whether a system message is queued
+// Update the updateIndicatorStatus function to handle messages with UUIDs
 function updateIndicatorStatus() {
     if (!messageIndicator || isUpdating) return;
 
@@ -259,12 +263,12 @@ function updateIndicatorStatus() {
     // Clear existing buttons
     buttonContainer.innerHTML = '';
 
-    if (systemMessages.length > 0) {
+    if (systemMessagesWithUUID.length > 0) {
         // Update text and style for active state
-        if (systemMessages.length === 1) {
-            statusText.textContent = `System message ready: "${systemMessages[0]}"`;
+        if (systemMessagesWithUUID.length === 1) {
+            statusText.textContent = `System message ready: "${systemMessagesWithUUID[0].message}"`;
         } else {
-            statusText.textContent = `${systemMessages.length} system messages ready`;
+            statusText.textContent = `${systemMessagesWithUUID.length} system messages ready`;
         }
 
         messageIndicator.style.backgroundColor = '#143d2b'; // Dark green
@@ -298,7 +302,7 @@ function updateIndicatorStatus() {
         clearButton.style.cursor = 'pointer';
 
         clearButton.onclick = function() {
-            systemMessages = [];
+            systemMessagesWithUUID = [];
             updateIndicatorStatus();
         };
 
@@ -311,15 +315,62 @@ function updateIndicatorStatus() {
     }
     isUpdating = false;
 }
-// Listen for messages from the extension
+
+
+// Add event listener for Enter key to acknowledge tasks
+function setupEnterKeyListener() {
+    console.log("Setting up Enter key listener");
+
+    // Find the Claude input field
+    const inputField = document.querySelector('[data-placeholder="Reply to Claude..."]');
+
+    if (!inputField) {
+        console.warn("Could not find Claude input field, retrying in 2 seconds");
+        setTimeout(setupEnterKeyListener, 2000);
+        return;
+    }
+
+    // Add a keydown event listener to the input field
+    inputField.addEventListener('keydown', function(event) {
+        // Check if the key pressed is Enter and not Shift+Enter
+        if (event.key === 'Enter' && !event.shiftKey) {
+            // Get all messageUUIDs from the pasted system messages
+            const messageUUIDs = systemMessagesWithUUID.map(msgObj => msgObj.messageUUID);
+
+            // Acknowledge each message
+            messageUUIDs.forEach(uuid => {
+                if (uuid) {
+                    chrome.runtime.sendMessage({
+                        action: 'acknowledgeTask',
+                        messageUUID: uuid
+                    });
+                }
+            });
+
+            // Clear system messages after sending
+            systemMessagesWithUUID = [];
+            updateIndicatorStatus();
+        }
+    });
+
+    console.log("Enter key listener set up successfully");
+}
+
+// Update the listener for messages from the extension
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     if (request.action === "injectMessage") {
-        systemMessages.push(request.message);
+        // Add message with UUID to the queue
+        systemMessagesWithUUID.push({
+            message: request.message,
+            messageUUID: request.messageUUID
+        });
         updateIndicatorStatus();
         sendResponse({status: "success"});
     }
 });
 
-// Start the initialization process
+// Call the setup function after initialization
 console.log("Claude API Listener content script loaded");
 attemptInitialization();
+// Set up the Enter key listener after initialization
+setTimeout(setupEnterKeyListener, 2000);

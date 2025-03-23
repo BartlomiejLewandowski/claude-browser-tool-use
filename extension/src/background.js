@@ -275,3 +275,125 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     return true;
   }
 });
+// Add the following code to the background.js file
+
+const SERVER_TASKS_URL = 'http://localhost:3003/unacknowledged-tasks';
+const TASK_ACKNOWLEDGE_URL = 'http://localhost:3003/acknowledge-task';
+const POLLING_INTERVAL = 5000; // Poll every 5 seconds
+
+// Initialize task polling
+initTaskPolling();
+
+// Function to poll for unacknowledged tasks
+function initTaskPolling() {
+  console.log('Initializing task polling');
+  // Start polling
+  pollForTasks();
+  // Set up interval for polling
+  setInterval(pollForTasks, POLLING_INTERVAL);
+}
+
+// Poll the server for unacknowledged tasks
+function pollForTasks() {
+  // Check if we have any active Claude tabs to send tasks to
+  chrome.tabs.query({ url: "*://*.claude.ai/*" }, function(tabs) {
+    if (tabs.length === 0) {
+      // No Claude tabs open, no need to poll for tasks
+      return;
+    }
+
+    // Get the conversation ID from the URL
+    const tab = tabs[0];
+    const url = new URL(tab.url);
+    const pathParts = url.pathname.split('/');
+    const conversationIndex = pathParts.indexOf('chat') + 1;
+
+    if (conversationIndex >= pathParts.length || !pathParts[conversationIndex]) {
+      // No valid conversation ID in the URL
+      console.log('No valid conversation ID found in URL:', url.pathname);
+      return;
+    }
+
+    const conversationId = pathParts[conversationIndex];
+
+    // Poll for tasks for this conversation
+    fetchUnacknowledgedTasks(conversationId, tab.id);
+  });
+}
+
+// Fetch unacknowledged tasks from the server
+function fetchUnacknowledgedTasks(conversationId, tabId) {
+  fetch(`${SERVER_TASKS_URL}/${conversationId}`)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(data => {
+        if (data.status === 'success' && data.tasks && data.tasks.length > 0) {
+          console.log(`Found ${data.tasks.length} unacknowledged tasks`);
+
+          // Send each task to the content script
+          data.tasks.forEach(task => {
+            sendTaskToContentScript(tabId, task);
+          });
+        }
+      })
+      .catch(error => {
+        console.error('Error polling for tasks:', error);
+      });
+}
+
+// Send a task to the content script for display
+function sendTaskToContentScript(tabId, task) {
+  const message = task.result && task.result.message ? task.result.message : 'Task completed';
+
+  chrome.tabs.sendMessage(tabId, {
+    action: 'injectMessage',
+    message: message,
+    messageUUID: task.message_uuid
+  }, function(response) {
+    if (response && response.status === 'success') {
+      console.log('System message injected successfully for task', task.message_uuid);
+    } else {
+      console.error('Failed to inject system message for task', task.message_uuid);
+    }
+  });
+}
+
+// Listen for acknowledgment messages from the content script
+chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+  if (request.action === 'acknowledgeTask' && request.messageUUID) {
+    acknowledgeTask(request.messageUUID);
+    sendResponse({status: 'success'});
+    return true;
+  }
+});
+
+// Acknowledge a task on the server
+function acknowledgeTask(messageUUID) {
+  fetch(`${TASK_ACKNOWLEDGE_URL}/${messageUUID}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ acknowledged: true })
+  })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(data => {
+        if (data.status === 'success') {
+          console.log(`Task ${messageUUID} acknowledged successfully`);
+        } else {
+          console.error(`Failed to acknowledge task ${messageUUID}:`, data.message);
+        }
+      })
+      .catch(error => {
+        console.error(`Error acknowledging task ${messageUUID}:`, error);
+      });
+}
