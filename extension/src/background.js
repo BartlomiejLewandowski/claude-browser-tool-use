@@ -134,26 +134,49 @@ function processEventStream(requestId, body, isComplete) {
   }
 
   if (newEvents.length > 0) {
-    // Extract text from content_block_delta events
+    // Track both text content and artifact content
     let newText = "";
+    let newArtifactContent = "";
+
     for (const event of newEvents) {
+      // Process regular text content
       if (event.type === "content_block_delta" &&
           event.data.delta?.type === "text_delta") {
         newText += event.data.delta.text;
       }
+
+      // Process artifact content (input_json_delta)
+      if (event.type === "content_block_delta" &&
+          event.data.delta?.type === "input_json_delta") {
+        // Store artifact content
+        newArtifactContent += event.data.delta.partial_json;
+
+        // Try to extract XML content from JSON if possible
+        // This is a simple heuristic - it looks for XML patterns in the JSON
+        if (event.data.delta.partial_json.includes("<") &&
+            event.data.delta.partial_json.includes(">")) {
+          console.log("Detected potential XML in artifact:",
+              event.data.delta.partial_json);
+        }
+      }
     }
 
-    // Add to accumulated text if there's new content
-    if (newText) {
-      stream.accumulated += newText;
+    // Combine all new content
+    const combinedNewContent = newText + (newArtifactContent ? "\n" + newArtifactContent : "");
+
+    // Add to accumulated text if there's any new content
+    if (combinedNewContent) {
+      // For artifact content, we're just appending it for now - in a more
+      // sophisticated implementation you might want to parse it properly
+      stream.accumulated += combinedNewContent;
       stream.events = events;
 
-      // Send the new content to the server
+      // Send the combined new content to the server
       sendToServer(
           stream.conversationId,
-          newText,
+          combinedNewContent,
           stream.accumulated,
-          stream.messageUuid || "unknown", // Include the message UUID
+          stream.messageUuid || "unknown",
           false // Not complete yet
       );
     }
@@ -172,11 +195,12 @@ function processEventStream(requestId, body, isComplete) {
         true // Mark as complete
     );
 
-    // Clean up
-    delete activeStreams[requestId];
+    // Don't delete the stream immediately to allow for potential DOM inspection
+    setTimeout(() => {
+      delete activeStreams[requestId];
+    }, 2000);
   }
 }
-
 // Parse an event stream (SSE) format string into an array of events
 function parseEventStream(body) {
   const events = [];
