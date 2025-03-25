@@ -247,36 +247,6 @@ chrome.tabs.onRemoved.addListener(function(tabId) {
   }
 });
 
-function injectSystemMessage(message) {
-  // Find all Claude tabs
-  chrome.tabs.query({url: "*://*.claude.ai/*"}, function(tabs) {
-    if (tabs.length > 0) {
-      // Send the message to each tab
-      tabs.forEach(tab => {
-        chrome.tabs.sendMessage(tab.id, {
-          action: 'injectMessage',
-          message: message
-        }, function(response) {
-          console.log('Injection response:', response);
-        });
-      });
-      console.log('Sent system message to', tabs.length, 'Claude tabs');
-    } else {
-      console.log('No Claude tabs found to inject message');
-    }
-  });
-}
-
-
-chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
-  if (request.action === 'injectSystemMessage' && request.message) {
-    injectSystemMessage(request.message);
-    sendResponse({status: 'success'});
-    return true;
-  }
-});
-// Add the following code to the background.js file
-
 const SERVER_TASKS_URL = 'http://localhost:3003/unacknowledged-tasks';
 const TASK_ACKNOWLEDGE_URL = 'http://localhost:3003/acknowledge-task';
 const POLLING_INTERVAL = 5000; // Poll every 5 seconds

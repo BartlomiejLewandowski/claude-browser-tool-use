@@ -334,19 +334,6 @@ function setupEnterKeyListener() {
     inputField.addEventListener('keydown', function(event) {
         // Check if the key pressed is Enter and not Shift+Enter
         if (event.key === 'Enter' && !event.shiftKey) {
-            // Get all messageUUIDs from the pasted system messages
-            const messageUUIDs = systemMessagesWithUUID.map(msgObj => msgObj.messageUUID);
-
-            // Acknowledge each message
-            messageUUIDs.forEach(uuid => {
-                if (uuid) {
-                    chrome.runtime.sendMessage({
-                        action: 'acknowledgeTask',
-                        messageUUID: uuid
-                    });
-                }
-            });
-
             // Clear system messages after sending
             systemMessagesWithUUID = [];
             updateIndicatorStatus();
@@ -364,6 +351,10 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
             message: request.message,
             messageUUID: request.messageUUID
         });
+        chrome.runtime.sendMessage({
+            action: 'acknowledgeTask',
+            messageUUID: request.messageUUID
+        })
         updateIndicatorStatus();
         sendResponse({status: "success"});
     }
