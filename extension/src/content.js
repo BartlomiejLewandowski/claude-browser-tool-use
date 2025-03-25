@@ -2,6 +2,7 @@
 let systemMessagesWithUUID = []; // Array of {message: string, messageUUID: string}
 
 let messageIndicator = null;
+let debuggerStatusIndicator = null;
 let initAttempts = 0;
 const MAX_INIT_ATTEMPTS = 10;
 let isPasting = false;
@@ -21,8 +22,15 @@ function attemptInitialization() {
             console.log("Reference element found, creating indicator");
             createPersistentIndicator(referenceElement);
 
+            // Also create the debugger status indicator
+            createDebuggerStatusIndicator(referenceElement);
+
             // Set up observer to ensure indicator persists
             setupObserver();
+
+            // Check debugger status
+            checkDebuggerStatus();
+
             return true;
         } else {
             console.log(`Attempt ${initAttempts + 1}/${MAX_INIT_ATTEMPTS}: Reference element not found yet`);
@@ -34,6 +42,7 @@ function attemptInitialization() {
             } else {
                 console.warn("Max attempts reached. Using fallback indicator.");
                 createFallbackIndicator();
+                createDebuggerStatusIndicator(document.body);
             }
             return false;
         }
@@ -47,17 +56,126 @@ function attemptInitialization() {
         } else {
             console.warn("Max attempts reached. Using fallback indicator.");
             createFallbackIndicator();
+            createDebuggerStatusIndicator(document.body);
         }
         return false;
     }
 }
 
+// Check the status of the debugger
+function checkDebuggerStatus() {
+    chrome.runtime.sendMessage({
+        action: 'checkDebuggerStatus'
+    }, function(response) {
+        if (chrome.runtime.lastError) {
+            console.error("Error checking debugger status:", chrome.runtime.lastError);
+            updateDebuggerStatus(false, "Error checking debugger status");
+            return;
+        }
+
+        updateDebuggerStatus(response.isConnected,
+            response.isConnected
+                ? "Debugger connected - Claude tool use enabled"
+                : "Debugger disconnected - Click to reconnect for Claude tool use");
+    });
+}
+
+// Update the debugger status indicator
+function updateDebuggerStatus(isConnected, message) {
+    if (!debuggerStatusIndicator) return;
+
+    // Update the status text and styling
+    const statusText = debuggerStatusIndicator.querySelector('.debugger-status-text');
+    if (statusText) {
+        statusText.textContent = message;
+    }
+
+    // Update the indicator styling based on connection status
+    if (isConnected) {
+        debuggerStatusIndicator.style.backgroundColor = '#143d2b'; // Dark green
+        debuggerStatusIndicator.style.borderColor = '#1e5937'; // Darker green border
+    } else {
+        debuggerStatusIndicator.style.backgroundColor = '#38191f'; // Dark red
+        debuggerStatusIndicator.style.borderColor = '#4e232a'; // Darker red border
+    }
+}
+
+// Create debugger status indicator
+function createDebuggerStatusIndicator(referenceElement) {
+    // First try to remove any existing indicator
+    if (debuggerStatusIndicator && document.body.contains(debuggerStatusIndicator)) {
+        debuggerStatusIndicator.remove();
+    }
+
+    // Create new indicator element
+    debuggerStatusIndicator = document.createElement('div');
+    debuggerStatusIndicator.className = 'debugger-status-indicator';
+    debuggerStatusIndicator.style.padding = '6px 12px';
+    debuggerStatusIndicator.style.margin = '4px 0';
+    debuggerStatusIndicator.style.backgroundColor = '#2d333b'; // Default dark
+    debuggerStatusIndicator.style.color = '#e6edf3'; // Light text
+    debuggerStatusIndicator.style.border = '1px solid #444c56'; // Darker border
+    debuggerStatusIndicator.style.borderRadius = '6px';
+    debuggerStatusIndicator.style.fontSize = '12px';
+    debuggerStatusIndicator.style.zIndex = '1000';
+    debuggerStatusIndicator.style.boxShadow = '0 2px 5px rgba(0,0,0,0.3)';
+    debuggerStatusIndicator.style.transition = 'background-color 0.3s';
+    debuggerStatusIndicator.style.width = '100%';
+    debuggerStatusIndicator.style.boxSizing = 'border-box';
+    debuggerStatusIndicator.style.display = 'flex';
+    debuggerStatusIndicator.style.justifyContent = 'space-between';
+    debuggerStatusIndicator.style.alignItems = 'center';
+    debuggerStatusIndicator.style.cursor = 'pointer';
+
+    // Create status text element
+    const statusText = document.createElement('div');
+    statusText.className = 'debugger-status-text';
+    statusText.style.flexGrow = '1'; // Take up available space
+    statusText.textContent = "Checking debugger status...";
+    debuggerStatusIndicator.appendChild(statusText);
+
+    // Add click handler to reconnect debugger
+    debuggerStatusIndicator.addEventListener('click', function() {
+        chrome.runtime.sendMessage({
+            action: 'reconnectDebugger'
+        }, function(response) {
+            if (chrome.runtime.lastError) {
+                console.error("Error reconnecting debugger:", chrome.runtime.lastError);
+                return;
+            }
+
+            // Update status text temporarily
+            statusText.textContent = "Attempting to reconnect debugger...";
+
+            // Check status again after a short delay
+            setTimeout(checkDebuggerStatus, 1000);
+        });
+    });
+
+    // Get the parent element
+    const parent = referenceElement.parentElement || document.body;
+
+    // Insert the indicator before the reference element
+    if (messageIndicator && document.body.contains(messageIndicator)) {
+        // If message indicator exists, insert before it
+        parent.insertBefore(debuggerStatusIndicator, messageIndicator);
+    } else {
+        // Otherwise, insert before the reference element
+        parent.insertBefore(debuggerStatusIndicator, referenceElement);
+    }
+
+    return debuggerStatusIndicator;
+}
+
 // Set up mutation observer to ensure our indicator stays active
 function setupObserver() {
     const observer = new MutationObserver(function(mutations) {
-        // Check if our indicator is still in the DOM
-        if (!document.body.contains(messageIndicator)) {
-            console.log("Indicator lost, attempting to recreate");
+        // Check if our indicators are still in the DOM
+        const missingMessageIndicator = messageIndicator && !document.body.contains(messageIndicator);
+        const missingDebuggerIndicator = debuggerStatusIndicator && !document.body.contains(debuggerStatusIndicator);
+
+        if (missingMessageIndicator || missingDebuggerIndicator) {
+            console.log("Indicators lost, attempting to recreate");
             attemptInitialization();
             return;
         }
@@ -116,6 +234,7 @@ function createPersistentIndicator(referenceElement) {
 
     return messageIndicator;
 }
+
 // Create a fallback indicator if we can't find the reference element
 function createFallbackIndicator() {
     // First try to remove any existing indicator

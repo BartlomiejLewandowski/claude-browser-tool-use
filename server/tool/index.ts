@@ -1,2 +1,2 @@
-import './calendar';
+import './calendar/calendar';
 import './spotify/spotify';

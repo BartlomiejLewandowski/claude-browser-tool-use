@@ -1,7 +1,9 @@
-// Background script for Claude Stream Capturer - Simple and focused
+// Background script for Claude Stream Capturer - Enhanced with resilience
 const SERVER_URL = 'http://localhost:3003/claude-stream';
 let debuggedTabId = null;
 let activeStreams = {};
+let debuggerActive = false;
+let lastKnownClaudeTabId = null;
 
 // Initialize debugging on installation
 chrome.runtime.onInstalled.addListener(function() {
@@ -15,6 +17,7 @@ function findAndAttachToClaudeTab() {
     if (tabs.length > 0) {
       const claudeTab = tabs[0];
       console.log("Found Claude tab:", claudeTab.id, claudeTab.url);
+      lastKnownClaudeTabId = claudeTab.id;
       attachDebugger(claudeTab.id);
     } else {
       console.log("No Claude tabs found. Will try again when a tab is updated.");
@@ -24,7 +27,7 @@ function findAndAttachToClaudeTab() {
 
 // Attach debugger to a tab
 function attachDebugger(tabId) {
-  if (debuggedTabId === tabId) return;
+  if (debuggedTabId === tabId && debuggerActive) return;
 
   if (debuggedTabId) {
     chrome.debugger.detach({ tabId: debuggedTabId }, function() {
@@ -39,14 +42,48 @@ function actuallyAttach(tabId) {
   chrome.debugger.attach({ tabId: tabId }, "1.0", function() {
     if (chrome.runtime.lastError) {
       console.error("Failed to attach debugger:", chrome.runtime.lastError);
+      debuggerActive = false;
+
+      // Inform the user about the debugging issue
+      notifyDebuggerStatus(tabId, false);
+
       return;
     }
 
     debuggedTabId = tabId;
+    debuggerActive = true;
     console.log("Debugger attached to tab:", tabId);
+
+    // Notify content script that debugger is connected
+    notifyDebuggerStatus(tabId, true);
 
     // Enable network monitoring
     chrome.debugger.sendCommand({ tabId: tabId }, "Network.enable", {});
+  });
+}
+
+// Notify content script about debugger status
+function notifyDebuggerStatus(tabId, isConnected) {
+  chrome.tabs.sendMessage(tabId, {
+    action: "debuggerStatus",
+    isConnected: isConnected,
+    message: isConnected
+        ? "Debugger connected successfully"
+        : "Debugger disconnected. Claude tools may not work properly. Click to reconnect."
+  }, function(response) {
+    if (chrome.runtime.lastError) {
+      console.log("Error sending debugger status:", chrome.runtime.lastError);
+
+      // Content script might not be loaded yet, try injecting it
+      chrome.tabs.executeScript(tabId, {file: "src/content.js"}, function() {
+        if (chrome.runtime.lastError) {
+          console.error("Failed to inject content script:", chrome.runtime.lastError);
+        } else {
+          // Try sending the message again after script is injected
+          setTimeout(() => notifyDebuggerStatus(tabId, isConnected), 500);
+        }
+      });
+    }
   });
 }
 
@@ -87,6 +124,17 @@ chrome.debugger.onEvent.addListener(function(source, method, params) {
   }
 });
 
+// Listen for debugger detached events (e.g., when user clicks "Cancel")
+chrome.debugger.onDetach.addListener(function(source) {
+  if (source.tabId === debuggedTabId) {
+    console.log("Debugger detached from tab:", debuggedTabId);
+    debuggerActive = false;
+
+    // Notify the user that the debugger was disconnected
+    notifyDebuggerStatus(debuggedTabId, false);
+  }
+});
+
 // Check if URL is a Claude completion endpoint
 function isCompletionEndpoint(url) {
   return url.includes("claude.ai/api/") &&
@@ -107,7 +155,17 @@ function getResponseBody(tabId, requestId, isComplete = false) {
       "Network.getResponseBody",
       { "requestId": requestId },
       function(response) {
-        if (chrome.runtime.lastError || !response || !response.body) return;
+        if (chrome.runtime.lastError) {
+          console.error("Error getting response body:", chrome.runtime.lastError);
+          // Check if the debugger was detached
+          if (chrome.runtime.lastError.message.includes("Debugger is not attached")) {
+            debuggerActive = false;
+            notifyDebuggerStatus(tabId, false);
+          }
+          return;
+        }
+
+        if (!response || !response.body) return;
 
         processEventStream(requestId, response.body, isComplete);
       }
@@ -201,6 +259,7 @@ function processEventStream(requestId, body, isComplete) {
     }, 2000);
   }
 }
+
 // Parse an event stream (SSE) format string into an array of events
 function parseEventStream(body) {
   const events = [];
@@ -242,10 +301,13 @@ function sendToServer(conversationId, newText, fullText, messageUuid, isComplete
   const xhr = new XMLHttpRequest();
   xhr.open('POST', SERVER_URL, true);
   xhr.setRequestHeader('Content-Type', 'application/json');
+  xhr.onerror = function() {
+    console.error("Error sending data to server. Make sure the server is running.");
+  };
 
   xhr.send(JSON.stringify({
     conversationId: conversationId,
-    messageUuid: messageUuid,  // This is the current_leaf_message_uuid
+    messageUuid: messageUuid,
     newText: newText,
     fullText: fullText,
     isComplete: isComplete,
@@ -257,7 +319,9 @@ function sendToServer(conversationId, newText, fullText, messageUuid, isComplete
 chrome.tabs.onUpdated.addListener(function(tabId, changeInfo, tab) {
   if (changeInfo.status === 'complete' && tab.url && tab.url.includes("claude.ai")) {
     console.log("Claude tab updated:", tabId);
-    if (!debuggedTabId) {
+    lastKnownClaudeTabId = tabId;
+
+    if (!debuggerActive || debuggedTabId !== tabId) {
       attachDebugger(tabId);
     }
   }
@@ -267,7 +331,37 @@ chrome.tabs.onUpdated.addListener(function(tabId, changeInfo, tab) {
 chrome.tabs.onRemoved.addListener(function(tabId) {
   if (tabId === debuggedTabId) {
     debuggedTabId = null;
+    debuggerActive = false;
     findAndAttachToClaudeTab();
+  }
+});
+
+// Listen for messages from content script
+chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+  if (request.action === 'acknowledgeTask' && request.messageUUID) {
+    acknowledgeTask(request.messageUUID);
+    sendResponse({status: 'success'});
+    return true;
+  }
+
+  if (request.action === 'reconnectDebugger') {
+    console.log("Reconnecting debugger by user request");
+    if (lastKnownClaudeTabId) {
+      attachDebugger(lastKnownClaudeTabId);
+      sendResponse({status: 'attempting'});
+    } else {
+      findAndAttachToClaudeTab();
+      sendResponse({status: 'searching'});
+    }
+    return true;
+  }
+
+  if (request.action === 'checkDebuggerStatus') {
+    sendResponse({
+      isConnected: debuggerActive,
+      tabId: debuggedTabId
+    });
+    return true;
   }
 });
 
@@ -355,15 +449,6 @@ function sendTaskToContentScript(tabId, task) {
     }
   });
 }
-
-// Listen for acknowledgment messages from the content script
-chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
-  if (request.action === 'acknowledgeTask' && request.messageUUID) {
-    acknowledgeTask(request.messageUUID);
-    sendResponse({status: 'success'});
-    return true;
-  }
-});
 
 // Acknowledge a task on the server
 function acknowledgeTask(messageUUID) {
