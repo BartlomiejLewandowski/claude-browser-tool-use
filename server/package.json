@@ -7,7 +7,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "migrate": "ts-node db/db-migration.ts",
     "dev": "ts-node server.ts",
-    "test:spotify": "ts-node tool/spotify/test.ts"
+    "test:spotify": "ts-node tool/spotify/test.ts",
+    "setup": "ts-node setup.ts"
   },
   "author": "",
   "license": "ISC",
@@ -15,6 +16,7 @@
     "@types/node": "^22.13.9",
     "axios": "^1.8.4",
     "body-parser": "^1.20.3",
+    "chalk": "^4.1.2",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "googleapis": "^146.0.0",
