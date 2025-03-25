@@ -8,5 +8,5 @@ export function registerTool(tool: Tool) {
 }
 
 export function findFirstMatching(messageContent: string) : Tool | null {
-    return Object.values(toolRegistry).find(v => messageContent.includes(v.getTagName())) || null;
+    return Object.values(toolRegistry).find(v => messageContent.includes("<" + v.getTagName())) || null;
 }
