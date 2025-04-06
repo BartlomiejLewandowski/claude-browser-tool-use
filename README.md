@@ -4,6 +4,7 @@ This project is a Chrome extension tied with a node.js server that allows users 
 
 ## Demo
 
+Can take a while to load (bigger gif). You can also see it in action on [YouTube](https://youtu.be/j8lgsGurY1w).
 ![Video Description](demo/output.gif)
 
 ## How it works
