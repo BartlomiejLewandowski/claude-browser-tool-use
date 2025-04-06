@@ -2,6 +2,10 @@
 
 This project is a Chrome extension tied with a node.js server that allows users to add tools which can be used by Claude.
 
+## Demo
+
+![Video Description](demo/output.gif)
+
 ## How it works
 
 - The content script is injected onto the claude.ai/chat page, which shows an indicator containing "system" messages. These will come as results from operations performed on the server side (by using tools provided there).
